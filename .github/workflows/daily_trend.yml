@@ -1,0 +1,26 @@
+name: Daily Stock Trend Radar
+
+on:
+  schedule:
+    - cron: "0 15 * * 1-5"  # 7am PST, weekdays only
+  workflow_dispatch:          # allow manual trigger for testing
+
+jobs:
+  send-digest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run trend stock script
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        run: uv run python trend_stock.py
