@@ -66,7 +66,7 @@ def test_fetch_trending_terms_uses_us_geo(monkeypatch):
     monkeypatch.setattr("trend_stock.requests.get", capture)
     fetch_trending_terms()
     assert "geo=US" in captured["url"]
-    assert "trending" in captured["url"]
+    assert "hours=12" in captured["url"]
 
 
 # --- enrich_with_stock_data ---

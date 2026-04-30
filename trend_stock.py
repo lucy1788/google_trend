@@ -12,7 +12,7 @@ import yfinance as yf
 from sp500 import build_lookup, find_ticker
 
 RECIPIENT = "luciee.yin@gmail.com"
-_TRENDS_RSS_URL = "https://trends.google.com/trending/rss?geo=US"
+_TRENDS_RSS_URL = "https://trends.google.com/trending/rss?geo=US&hours=12"
 
 
 def fetch_trending_terms() -> list[str]:
