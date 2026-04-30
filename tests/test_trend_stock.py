@@ -25,37 +25,48 @@ def make_mock_history(n=30, base_price=100.0, base_volume=1_000_000):
     )
 
 
+def make_mock_rss(titles: list[str]) -> bytes:
+    items = "".join(f"<item><title>{t}</title></item>" for t in titles)
+    return f'<?xml version="1.0"?><rss><channel>{items}</channel></rss>'.encode()
+
+
+def mock_requests_get(content: bytes):
+    mock_resp = MagicMock()
+    mock_resp.content = content
+    return mock_resp
+
+
 # --- fetch_trending_terms ---
 
 def test_fetch_trending_terms_returns_list(monkeypatch):
-    mock_df = pd.DataFrame(["Apple earnings", "Tesla recall", "weather"])
-    mock_pytrends = MagicMock()
-    mock_pytrends.trending_searches.return_value = mock_df
-    monkeypatch.setattr("trend_stock.TrendReq", lambda **kwargs: mock_pytrends)
+    monkeypatch.setattr(
+        "trend_stock.requests.get",
+        lambda *a, **kw: mock_requests_get(make_mock_rss(["Apple earnings", "Tesla recall", "weather"])),
+    )
     result = fetch_trending_terms()
     assert result == ["Apple earnings", "Tesla recall", "weather"]
 
 
 def test_fetch_trending_terms_empty(monkeypatch):
-    mock_pytrends = MagicMock()
-    mock_pytrends.trending_searches.return_value = pd.DataFrame()
-    monkeypatch.setattr("trend_stock.TrendReq", lambda **kwargs: mock_pytrends)
+    monkeypatch.setattr(
+        "trend_stock.requests.get",
+        lambda *a, **kw: mock_requests_get(make_mock_rss([])),
+    )
     result = fetch_trending_terms()
     assert result == []
 
 
-def test_fetch_trending_terms_uses_us_locale(monkeypatch):
-    mock_pytrends = MagicMock()
-    mock_pytrends.trending_searches.return_value = pd.DataFrame(["test"])
+def test_fetch_trending_terms_uses_us_geo(monkeypatch):
     captured = {}
 
-    def capture(**kwargs):
-        captured.update(kwargs)
-        return mock_pytrends
+    def capture(url, **kwargs):
+        captured["url"] = url
+        return mock_requests_get(make_mock_rss(["test"]))
 
-    monkeypatch.setattr("trend_stock.TrendReq", capture)
+    monkeypatch.setattr("trend_stock.requests.get", capture)
     fetch_trending_terms()
-    assert captured.get("hl") == "en-US"
+    assert "geo=US" in captured["url"]
+    assert "trending" in captured["url"]
 
 
 # --- enrich_with_stock_data ---
@@ -152,52 +163,65 @@ SAMPLE_MATCHES = [
     },
 ]
 
+SAMPLE_TERMS = ["Apple earnings", "Boeing recall", "weather forecast", "NBA finals"]
+
 
 def test_build_email_html_contains_tickers():
-    html = build_email_html(SAMPLE_MATCHES)
+    html = build_email_html(SAMPLE_MATCHES, SAMPLE_TERMS)
     assert "AAPL" in html
     assert "BA" in html
 
 
 def test_build_email_html_contains_terms():
-    html = build_email_html(SAMPLE_MATCHES)
+    html = build_email_html(SAMPLE_MATCHES, SAMPLE_TERMS)
     assert "Apple earnings" in html
     assert "Boeing recall" in html
 
 
 def test_build_email_html_contains_price():
-    html = build_email_html(SAMPLE_MATCHES)
+    html = build_email_html(SAMPLE_MATCHES, SAMPLE_TERMS)
     assert "189.40" in html
 
 
 def test_build_email_html_positive_change_green():
-    html = build_email_html(SAMPLE_MATCHES)
+    html = build_email_html(SAMPLE_MATCHES, SAMPLE_TERMS)
     assert "#16a34a" in html
 
 
 def test_build_email_html_negative_change_red():
-    html = build_email_html(SAMPLE_MATCHES)
+    html = build_email_html(SAMPLE_MATCHES, SAMPLE_TERMS)
     assert "#dc2626" in html
 
 
 def test_build_email_html_shows_match_count():
-    html = build_email_html(SAMPLE_MATCHES)
+    html = build_email_html(SAMPLE_MATCHES, SAMPLE_TERMS)
     assert "2 trending" in html
 
 
 def test_build_email_html_no_matches_fallback():
-    html = build_email_html([])
+    html = build_email_html([], SAMPLE_TERMS)
     assert "No S" in html
 
 
 def test_build_email_html_positive_has_plus_sign():
-    html = build_email_html(SAMPLE_MATCHES)
+    html = build_email_html(SAMPLE_MATCHES, SAMPLE_TERMS)
     assert "+2.30%" in html
 
 
 def test_build_email_html_negative_no_plus_sign():
-    html = build_email_html(SAMPLE_MATCHES)
+    html = build_email_html(SAMPLE_MATCHES, SAMPLE_TERMS)
     assert "-1.50%" in html
+
+
+def test_build_email_html_shows_all_trending_terms():
+    html = build_email_html(SAMPLE_MATCHES, SAMPLE_TERMS)
+    assert "weather forecast" in html
+    assert "NBA finals" in html
+
+
+def test_build_email_html_trending_section_present():
+    html = build_email_html([], SAMPLE_TERMS)
+    assert "All Trending Searches Today" in html
 
 
 # --- send_email ---
