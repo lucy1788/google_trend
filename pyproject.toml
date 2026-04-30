@@ -1,0 +1,22 @@
+[project]
+name = "trend-stock"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "pytrends",
+    "yfinance",
+    "pandas",
+    "requests",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: live network tests (deselected by default)",
+]
+addopts = "-m 'not integration'"
