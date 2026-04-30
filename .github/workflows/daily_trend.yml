@@ -5,6 +5,9 @@ on:
     - cron: "0 15 * * 1-5"  # 7am PST, weekdays only
   workflow_dispatch:          # allow manual trigger for testing
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   send-digest:
     runs-on: ubuntu-latest
