@@ -224,6 +224,49 @@ def test_build_email_html_trending_section_present():
     assert "All Trending Searches Today" in html
 
 
+def test_build_email_html_llm_match_shows_ai_badge():
+    matches = [
+        {
+            "term": "Nvidia surge",
+            "matched_name": "nvda",
+            "ticker": "NVDA",
+            "price": 130.0,
+            "pct_change": 3.5,
+            "vol_ratio": 2.0,
+            "trend": [125, 126, 127, 128, 130],
+            "llm_matched": True,
+            "llm_reason": "Nvidia is NVDA",
+        }
+    ]
+    html = build_email_html(matches, SAMPLE_TERMS)
+    assert "AI" in html
+    assert "NVDA" in html
+
+
+def test_build_email_html_llm_match_no_stock_data_shows_dash():
+    matches = [
+        {
+            "term": "Nvidia surge",
+            "matched_name": "nvda",
+            "ticker": "NVDA",
+            "price": None,
+            "pct_change": None,
+            "vol_ratio": None,
+            "trend": [],
+            "llm_matched": True,
+            "llm_reason": "Nvidia is NVDA",
+        }
+    ]
+    html = build_email_html(matches, SAMPLE_TERMS)
+    assert "NVDA" in html
+    assert "&mdash;" in html
+
+
+def test_build_email_html_keyword_match_no_ai_badge():
+    html = build_email_html(SAMPLE_MATCHES, SAMPLE_TERMS)
+    assert "AI" not in html
+
+
 # --- send_email ---
 
 def test_send_email_calls_login_and_sendmail(monkeypatch):
@@ -286,6 +329,7 @@ def mock_run_deps(monkeypatch):
         "trend_stock.enrich_with_stock_data",
         lambda ticker: {"ticker": ticker, "price": 150.0, "pct_change": 1.5, "vol_ratio": 1.2, "trend": [145, 146, 147, 148, 150]},
     )
+    monkeypatch.setattr("trend_stock.classify_terms", lambda terms: [])
 
 
 def test_run_sends_email(mock_run_deps, monkeypatch):
@@ -307,6 +351,7 @@ def test_run_email_contains_matched_tickers(mock_run_deps, monkeypatch):
 def test_run_deduplicates_tickers(monkeypatch):
     monkeypatch.setattr("trend_stock.build_lookup", lambda: {"apple": "AAPL"})
     monkeypatch.setattr("trend_stock.fetch_trending_terms", lambda: ["Apple news", "Apple stock surge"])
+    monkeypatch.setattr("trend_stock.classify_terms", lambda terms: [])
 
     enrich_calls = []
 
@@ -324,6 +369,7 @@ def test_run_skips_ticker_with_no_stock_data(monkeypatch):
     monkeypatch.setattr("trend_stock.build_lookup", lambda: {"apple": "AAPL"})
     monkeypatch.setattr("trend_stock.fetch_trending_terms", lambda: ["Apple earnings"])
     monkeypatch.setattr("trend_stock.enrich_with_stock_data", lambda ticker: None)
+    monkeypatch.setattr("trend_stock.classify_terms", lambda terms: [])
 
     sent = {}
     monkeypatch.setattr("trend_stock.send_email", lambda s, h: sent.update({"html": h}))
@@ -335,9 +381,87 @@ def test_run_no_matches_still_sends(monkeypatch):
     monkeypatch.setattr("trend_stock.build_lookup", lambda: {})
     monkeypatch.setattr("trend_stock.fetch_trending_terms", lambda: ["weather forecast"])
     monkeypatch.setattr("trend_stock.find_ticker", lambda term, lookup: None)
+    monkeypatch.setattr("trend_stock.classify_terms", lambda terms: [])
 
     sent = {}
     monkeypatch.setattr("trend_stock.send_email", lambda s, h: sent.update({"called": True, "html": h}))
     run()
     assert sent.get("called")
     assert "No S" in sent["html"]
+
+
+def test_run_llm_matched_term_appears_in_email(monkeypatch):
+    monkeypatch.setattr("trend_stock.build_lookup", lambda: {})
+    monkeypatch.setattr("trend_stock.fetch_trending_terms", lambda: ["Nvidia earnings"])
+    monkeypatch.setattr("trend_stock.find_ticker", lambda term, lookup: None)
+    monkeypatch.setattr(
+        "trend_stock.classify_terms",
+        lambda terms: [{"term": "Nvidia earnings", "ticker": "NVDA", "reason": "Nvidia is NVDA"}],
+    )
+    monkeypatch.setattr(
+        "trend_stock.enrich_with_stock_data",
+        lambda ticker: {"ticker": ticker, "price": 130.0, "pct_change": 2.0, "vol_ratio": 1.5, "trend": [125, 126, 127, 128, 130]},
+    )
+
+    sent = {}
+    monkeypatch.setattr("trend_stock.send_email", lambda s, h: sent.update({"html": h}))
+    run()
+    assert "NVDA" in sent["html"]
+    assert "AI" in sent["html"]
+
+
+def test_run_llm_matched_no_stock_data_shows_placeholder(monkeypatch):
+    monkeypatch.setattr("trend_stock.build_lookup", lambda: {})
+    monkeypatch.setattr("trend_stock.fetch_trending_terms", lambda: ["Nvidia earnings"])
+    monkeypatch.setattr("trend_stock.find_ticker", lambda term, lookup: None)
+    monkeypatch.setattr(
+        "trend_stock.classify_terms",
+        lambda terms: [{"term": "Nvidia earnings", "ticker": "NVDA", "reason": "Nvidia is NVDA"}],
+    )
+    monkeypatch.setattr("trend_stock.enrich_with_stock_data", lambda ticker: None)
+
+    sent = {}
+    monkeypatch.setattr("trend_stock.send_email", lambda s, h: sent.update({"html": h}))
+    run()
+    assert "NVDA" in sent["html"]
+    assert "&mdash;" in sent["html"]
+
+
+def test_run_llm_null_ticker_skipped(monkeypatch):
+    monkeypatch.setattr("trend_stock.build_lookup", lambda: {})
+    monkeypatch.setattr("trend_stock.fetch_trending_terms", lambda: ["weather forecast"])
+    monkeypatch.setattr("trend_stock.find_ticker", lambda term, lookup: None)
+    monkeypatch.setattr(
+        "trend_stock.classify_terms",
+        lambda terms: [{"term": "weather forecast", "ticker": None, "reason": "Not finance-related"}],
+    )
+
+    sent = {}
+    monkeypatch.setattr("trend_stock.send_email", lambda s, h: sent.update({"html": h}))
+    run()
+    assert "No S" in sent["html"]
+
+
+def test_run_llm_deduplicates_with_keyword_tickers(monkeypatch):
+    monkeypatch.setattr("trend_stock.build_lookup", lambda: {"apple": "AAPL"})
+    monkeypatch.setattr("trend_stock.fetch_trending_terms", lambda: ["Apple earnings", "Apple AI news"])
+    monkeypatch.setattr(
+        "trend_stock.enrich_with_stock_data",
+        lambda ticker: {"ticker": ticker, "price": 189.0, "pct_change": 1.0, "vol_ratio": 1.1, "trend": [185, 186, 187, 188, 189]},
+    )
+    monkeypatch.setattr(
+        "trend_stock.classify_terms",
+        lambda terms: [{"term": "Apple AI news", "ticker": "AAPL", "reason": "Apple is AAPL"}],
+    )
+
+    enrich_calls = []
+    original_enrich = lambda ticker: {"ticker": ticker, "price": 189.0, "pct_change": 1.0, "vol_ratio": 1.1, "trend": [185, 186, 187, 188, 189]}
+
+    def counting_enrich(ticker):
+        enrich_calls.append(ticker)
+        return original_enrich(ticker)
+
+    monkeypatch.setattr("trend_stock.enrich_with_stock_data", counting_enrich)
+    monkeypatch.setattr("trend_stock.send_email", lambda s, h: None)
+    run()
+    assert enrich_calls.count("AAPL") == 1

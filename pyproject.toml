@@ -7,6 +7,8 @@ dependencies = [
     "pandas",
     "lxml",
     "requests",
+    "openai",
+    "pydantic",
 ]
 
 [project.optional-dependencies]

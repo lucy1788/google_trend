@@ -9,6 +9,7 @@ from email.mime.text import MIMEText
 import requests
 import yfinance as yf
 
+from llm_classifier import classify_terms
 from sp500 import build_lookup, find_ticker
 
 RECIPIENT = "luciee.yin@gmail.com"
@@ -60,7 +61,7 @@ def build_email_html(matches: list[dict], all_terms: list[str]) -> str:
 
     if matches:
         stock_section = f"""
-  <p style="color:#64748b">{len(matches)} trending search(es) matched to S&amp;P 500 stocks.</p>
+  <p style="color:#64748b">{len(matches)} trending search(es) matched to stocks.</p>
   <table style="border-collapse:collapse;width:100%">
     <thead>
       <tr style="background:#f1f5f9;text-align:left">
@@ -98,15 +99,28 @@ def build_email_html(matches: list[dict], all_terms: list[str]) -> str:
 
 
 def _stock_row(m: dict) -> str:
-    color = "#16a34a" if m["pct_change"] >= 0 else "#dc2626"
-    sign = "+" if m["pct_change"] >= 0 else ""
+    ticker_cell = m["ticker"]
+    if m.get("llm_matched"):
+        ticker_cell += ' <span style="font-size:10px;background:#e0f2fe;color:#0369a1;padding:1px 4px;border-radius:3px">AI</span>'
+
+    if m.get("price") is None:
+        price_cell = "&mdash;"
+        change_cell = "&mdash;"
+        vol_cell = "&mdash;"
+    else:
+        color = "#16a34a" if m["pct_change"] >= 0 else "#dc2626"
+        sign = "+" if m["pct_change"] >= 0 else ""
+        price_cell = f"${m['price']:.2f}"
+        change_cell = f'<span style="color:{color};font-weight:bold">{sign}{m["pct_change"]:.2f}%</span>'
+        vol_cell = f"{m['vol_ratio']:.1f}x avg"
+
     return f"""
       <tr style="border-bottom:1px solid #e2e8f0">
         <td style="padding:8px 12px">{m["term"]}</td>
-        <td style="padding:8px 12px;font-weight:bold">{m["ticker"]}</td>
-        <td style="padding:8px 12px">${m["price"]:.2f}</td>
-        <td style="padding:8px 12px;color:{color};font-weight:bold">{sign}{m["pct_change"]:.2f}%</td>
-        <td style="padding:8px 12px">{m["vol_ratio"]:.1f}x avg</td>
+        <td style="padding:8px 12px;font-weight:bold">{ticker_cell}</td>
+        <td style="padding:8px 12px">{price_cell}</td>
+        <td style="padding:8px 12px">{change_cell}</td>
+        <td style="padding:8px 12px">{vol_cell}</td>
       </tr>"""
 
 
@@ -134,9 +148,12 @@ def run() -> None:
 
     matches = []
     seen_tickers: set[str] = set()
+    unmatched_terms: list[str] = []
+
     for term in terms:
         result = find_ticker(term, lookup)
         if result is None:
+            unmatched_terms.append(term)
             continue
         name, ticker = result
         if ticker in seen_tickers:
@@ -145,6 +162,25 @@ def run() -> None:
         if stock_data:
             matches.append({"term": term, "matched_name": name, **stock_data})
             seen_tickers.add(ticker)
+
+    for classification in classify_terms(unmatched_terms):
+        ticker = classification.get("ticker")
+        if not ticker or ticker in seen_tickers:
+            continue
+        stock_data = enrich_with_stock_data(ticker)
+        entry = {
+            "term": classification["term"],
+            "matched_name": ticker.lower(),
+            "ticker": ticker,
+            "llm_matched": True,
+            "llm_reason": classification.get("reason", ""),
+        }
+        if stock_data:
+            entry.update(stock_data)
+        else:
+            entry.update({"price": None, "pct_change": None, "vol_ratio": None, "trend": []})
+        matches.append(entry)
+        seen_tickers.add(ticker)
 
     today = date.today().strftime("%B %d, %Y")
     send_email(f"Stock Trend Radar - {today}", build_email_html(matches, terms))

@@ -46,6 +46,7 @@ Create a `.env` file:
 ```
 GMAIL_USER=you@gmail.com
 GMAIL_APP_PASSWORD=your-16-char-app-password
+OPENAI_API_KEY=your-openai-api-key
 ```
 
 > To generate an app password: [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
